@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::thread::available_parallelism;
 
 use clap::Parser;
 use log::*;
@@ -41,8 +42,13 @@ fn main_impl() -> anyhow::Result<()> {
             let files: Vec<PathBuf> = walkdir::WalkDir::new(root)
                 .into_iter()
                 .filter_entry(|e| {
+                    let dir_name = e.file_name().to_string_lossy();
+                    // Exclude cargo generated code
+                    !dir_name.contains("target")
+                    // Exclude hidden directories (.git)
+                    && !dir_name.starts_with(".")
                     // Exclude e.g. target/ for the root package
-                    !e.path().join("CACHEDIR.TAG").exists()
+                    && !e.path().join("CACHEDIR.TAG").exists()
                     // Exclude other workspace members (especially for the root crate)
                     && workspace_packages
                         .iter()
@@ -59,6 +65,7 @@ fn main_impl() -> anyhow::Result<()> {
                 .collect();
             files
                 .into_par_iter()
+                .with_max_len(available_parallelism().map(|n| n.get()).unwrap_or(8))
                 .map(|f| process_file(&f, name, &workspace_packages, &args))
         })
         .collect::<Result<Vec<_>, _>>()?;
